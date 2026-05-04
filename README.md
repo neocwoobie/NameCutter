@@ -50,6 +50,12 @@ git tag v0.1.2
 git push origin v0.1.2
 ```
 
+也可以在 GitHub 的 `Actions -> Release -> Run workflow` 手動觸發，直接輸入版本號：
+
+- 可輸入 `0.1.2` 或 `v0.1.2`
+- workflow 會先檢查輸入值是否和 `pyproject.toml` 內的版本一致
+- 檢查通過後，workflow 會自動建立對應 tag、打包、產生 checksum、建立 Release
+
 ## 規則摘要
 
 - 判斷基準是「輸出後完整絕對路徑字元數」

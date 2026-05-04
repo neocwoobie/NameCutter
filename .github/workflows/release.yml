@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.1.2 or v0.1.2
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,11 +21,63 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+
+      - name: Resolve release metadata
+        id: release_meta
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $requested = '${{ github.event.inputs.version }}'.Trim()
+            if (-not $requested) {
+              throw 'Version input is required.'
+            }
+
+            if ($requested.StartsWith('v')) {
+              $tagName = $requested
+              $version = $requested.Substring(1)
+            } else {
+              $tagName = "v$requested"
+              $version = $requested
+            }
+
+            $pyprojectVersion = @'
+          import tomllib
+          from pathlib import Path
+          with Path("pyproject.toml").open("rb") as handle:
+              print(tomllib.load(handle)["project"]["version"])
+          '@ | python -
+
+            if ($version -ne $pyprojectVersion.Trim()) {
+              throw "Version input '$version' does not match pyproject.toml version '$($pyprojectVersion.Trim())'."
+            }
+          } else {
+            $tagName = '${{ github.ref_name }}'
+            $version = $tagName.TrimStart('v')
+          }
+
+          "tag_name=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create tag for manual release
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          git fetch --tags --force
+          $tagName = '${{ steps.release_meta.outputs.tag_name }}'
+          if (git rev-parse $tagName 2>$null) {
+            throw "Tag $tagName already exists."
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag $tagName
+          git push origin $tagName
 
       - name: Install build dependency
         shell: pwsh
@@ -49,6 +106,8 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.tag_name }}
           files: |
             dist/NameCutter.exe
             dist/NameCutter.exe.sha256

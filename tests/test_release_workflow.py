@@ -17,9 +17,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
         self.assertIn("tags:", content)
         self.assertIn("- 'v*'", content)
+        self.assertIn("workflow_dispatch:", content)
+        self.assertIn("inputs:", content)
+        self.assertIn("version:", content)
         self.assertIn("python -m unittest discover -s tests -v", content)
         self.assertIn("powershell -ExecutionPolicy Bypass -File .\\build.ps1", content)
         self.assertIn("Get-FileHash dist\\NameCutter.exe -Algorithm SHA256", content)
+        self.assertIn("github.event_name == 'workflow_dispatch'", content)
+        self.assertIn("git tag", content)
+        self.assertIn("git push origin", content)
         self.assertIn("softprops/action-gh-release", content)
 
 
