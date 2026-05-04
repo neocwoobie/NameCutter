@@ -60,6 +60,7 @@ def build_preview(options: ScanOptions) -> list[PreviewItem]:
                     action="skip",
                     status="skip",
                     reason="Cannot fit within the path limit while keeping folders.",
+                    original_path_length=_path_length(source_path),
                 )
             )
             continue
@@ -73,6 +74,7 @@ def build_preview(options: ScanOptions) -> list[PreviewItem]:
                 action=_determine_action(source_path, target_path, options.in_place),
                 status="ready",
                 reason=_build_reason(candidate, source_path.name),
+                original_path_length=_path_length(source_path),
             )
         )
 

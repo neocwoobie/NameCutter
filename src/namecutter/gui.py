@@ -76,21 +76,23 @@ class NameCutterApp:
         table_frame.columnconfigure(0, weight=1)
         table_frame.rowconfigure(0, weight=1)
 
-        columns = ("source", "target", "action", "status", "reason")
+        columns = ("source", "target", "original_length", "action", "status", "reason")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
         headings = {
             "source": "Source Path",
             "target": "Target Path",
+            "original_length": "Original Path Length",
             "action": "Action",
             "status": "Status",
             "reason": "Reason",
         }
         widths = {
-            "source": 320,
-            "target": 320,
+            "source": 300,
+            "target": 300,
+            "original_length": 140,
             "action": 100,
             "status": 90,
-            "reason": 280,
+            "reason": 240,
         }
         for column in columns:
             self.tree.heading(column, text=headings[column])
@@ -218,9 +220,9 @@ class NameCutterApp:
                 values=(
                     str(item.source_path),
                     str(item.target_path),
+                    item.original_path_length,
                     item.action,
                     item.status,
                     item.reason,
                 ),
             )
-

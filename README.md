@@ -9,6 +9,7 @@ NameCutter 是一個 Windows 桌面小工具，用來批量處理過長檔名。
 - 保留完整副檔名，例如 `.tar.gz`
 - 預覽後才執行，避免直接改壞大量檔案
 - 支援輸出到另一個資料夾，或原地更名
+- 預覽表格顯示 cut 前完整來源路徑的總字元數
 - 提供 PyInstaller 打包腳本，產出 `NameCutter.exe`
 
 ## 本機執行
@@ -32,6 +33,22 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
 產出檔會在 `dist\NameCutter.exe`。
+
+## 自動發版
+
+專案內建 GitHub Actions 發版流程。當你 push 一個像 `v0.1.1` 這樣的 tag 時，GitHub Actions 會自動：
+
+- 在 Windows runner 上跑測試
+- 執行 `build.ps1` 產出 `NameCutter.exe`
+- 產生 `NameCutter.exe.sha256`
+- 建立對應的 GitHub Release 並上傳這兩個 assets
+
+手動觸發範例：
+
+```powershell
+git tag v0.1.1
+git push origin v0.1.1
+```
 
 ## 規則摘要
 

@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install build dependency
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+
+      - name: Run test suite
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build.ps1
+
+      - name: Generate SHA256 checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\NameCutter.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash *NameCutter.exe" | Set-Content -Path dist\NameCutter.exe.sha256 -Encoding ascii
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/NameCutter.exe
+            dist/NameCutter.exe.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

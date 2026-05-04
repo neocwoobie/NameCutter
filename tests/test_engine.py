@@ -33,6 +33,10 @@ class BuildPreviewTests(unittest.TestCase):
             self.assertEqual("copy", preview[0].action)
             self.assertEqual("ready", preview[0].status)
             self.assertEqual(output_dir / "notes.txt", preview[0].target_path)
+            self.assertEqual(
+                len(str(source_file.resolve(strict=False))),
+                preview[0].original_path_length,
+            )
 
     def test_truncates_filename_when_output_path_exceeds_limit(self) -> None:
         with tempfile.TemporaryDirectory() as root_dir:

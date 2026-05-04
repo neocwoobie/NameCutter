@@ -19,6 +19,7 @@ class PreviewItem:
     action: str
     status: str
     reason: str
+    original_path_length: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,4 +28,3 @@ class ExecutionSummary:
     changed: int
     skipped: int
     failed: int
-
