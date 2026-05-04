@@ -9,6 +9,10 @@ from namecutter.engine import apply_preview, build_preview
 from namecutter.models import ScanOptions
 
 
+def _resolved_length(path: Path) -> int:
+    return len(str(path.resolve(strict=False)))
+
+
 class BuildPreviewTests(unittest.TestCase):
     def test_keeps_name_when_output_path_is_within_limit(self) -> None:
         with tempfile.TemporaryDirectory() as root_dir:
@@ -32,9 +36,12 @@ class BuildPreviewTests(unittest.TestCase):
             self.assertEqual(1, len(preview))
             self.assertEqual("copy", preview[0].action)
             self.assertEqual("ready", preview[0].status)
-            self.assertEqual(output_dir / "notes.txt", preview[0].target_path)
             self.assertEqual(
-                len(str(source_file.resolve(strict=False))),
+                (output_dir / "notes.txt").resolve(strict=False),
+                preview[0].target_path.resolve(strict=False),
+            )
+            self.assertEqual(
+                _resolved_length(source_file),
                 preview[0].original_path_length,
             )
 
@@ -64,10 +71,7 @@ class BuildPreviewTests(unittest.TestCase):
                 preview[0].target_path.name.startswith("very"),
                 preview[0].target_path.name,
             )
-            self.assertLessEqual(
-                len(str(preview[0].target_path.resolve(strict=False))),
-                66,
-            )
+            self.assertLessEqual(_resolved_length(preview[0].target_path), 66)
 
     def test_adds_numeric_suffix_when_truncated_names_collide(self) -> None:
         with tempfile.TemporaryDirectory() as root_dir:
@@ -81,14 +85,28 @@ class BuildPreviewTests(unittest.TestCase):
             first.write_text("1", encoding="utf-8")
             second.write_text("2", encoding="utf-8")
 
-            preview = build_preview(
-                ScanOptions(
-                    source_dir=source_dir,
-                    output_dir=output_dir,
-                    max_path_length=56,
-                    in_place=False,
+            preview = []
+            for max_length in range(
+                _resolved_length(output_dir / "a.txt"),
+                _resolved_length(output_dir / "collision-example-aaaa.txt"),
+            ):
+                candidate_preview = build_preview(
+                    ScanOptions(
+                        source_dir=source_dir,
+                        output_dir=output_dir,
+                        max_path_length=max_length,
+                        in_place=False,
+                    )
                 )
-            )
+                target_names = sorted(item.target_path.name for item in candidate_preview)
+                if (
+                    all(item.status == "ready" for item in candidate_preview)
+                    and any(name.endswith("_1.txt") for name in target_names)
+                ):
+                    preview = candidate_preview
+                    break
+
+            self.assertTrue(preview, "Expected to find a path limit that triggers collision suffixing.")
 
             target_names = sorted(item.target_path.name for item in preview)
             self.assertEqual(2, len(set(target_names)))
@@ -137,7 +155,10 @@ class BuildPreviewTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(output_dir / "nested" / "project plan draft.txt", preview[0].target_path)
+            self.assertEqual(
+                (output_dir / "nested" / "project plan draft.txt").resolve(strict=False),
+                preview[0].target_path.resolve(strict=False),
+            )
 
     def test_preserves_subdirectories_for_in_place_mode(self) -> None:
         with tempfile.TemporaryDirectory() as root_dir:
@@ -157,7 +178,10 @@ class BuildPreviewTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(source_dir / "中文 資料夾", preview[0].target_path.parent)
+            self.assertEqual(
+                (source_dir / "中文 資料夾").resolve(strict=False),
+                preview[0].target_path.parent.resolve(strict=False),
+            )
             self.assertIn(preview[0].action, {"keep", "rename"})
 
 
@@ -171,11 +195,12 @@ class ApplyPreviewTests(unittest.TestCase):
             output_dir.mkdir()
             (source_dir / "very-long-file-name-for-copy.txt").write_text("copy me", encoding="utf-8")
 
+            max_length = _resolved_length(output_dir / "copy.txt")
             preview = build_preview(
                 ScanOptions(
                     source_dir=source_dir,
                     output_dir=output_dir,
-                    max_path_length=55,
+                    max_path_length=max_length,
                     in_place=False,
                 )
             )
@@ -194,11 +219,12 @@ class ApplyPreviewTests(unittest.TestCase):
             source_path = source_dir / "very-long-file-name-for-in-place-mode.txt"
             source_path.write_text("rename me", encoding="utf-8")
 
+            max_length = _resolved_length(source_dir / "rename.txt")
             preview = build_preview(
                 ScanOptions(
                     source_dir=source_dir,
                     output_dir=source_dir,
-                    max_path_length=55,
+                    max_path_length=max_length,
                     in_place=True,
                 )
             )

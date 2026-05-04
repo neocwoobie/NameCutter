@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 ## 自動發版
 
-專案內建 GitHub Actions 發版流程。當你 push 一個像 `v0.1.1` 這樣的 tag 時，GitHub Actions 會自動：
+專案內建 GitHub Actions 發版流程。當你 push 一個像 `v0.1.2` 這樣的 tag 時，GitHub Actions 會自動：
 
 - 在 Windows runner 上跑測試
 - 執行 `build.ps1` 產出 `NameCutter.exe`
@@ -46,8 +46,8 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 手動觸發範例：
 
 ```powershell
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 ## 規則摘要

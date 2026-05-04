@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "namecutter"
-version = "0.1.1"
+version = "0.1.2"
 description = "Windows GUI tool for shortening file names when output paths exceed a limit."
 readme = "README.md"
 requires-python = ">=3.13"
