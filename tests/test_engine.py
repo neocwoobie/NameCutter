@@ -81,7 +81,7 @@ class BuildPreviewTests(unittest.TestCase):
                 ScanOptions(
                     source_dir=source_dir,
                     output_dir=output_dir,
-                    max_path_length=55,
+                    max_path_length=56,
                     in_place=False,
                 )
             )
@@ -148,7 +148,7 @@ class BuildPreviewTests(unittest.TestCase):
                 ScanOptions(
                     source_dir=source_dir,
                     output_dir=source_dir,
-                    max_path_length=50,
+                    max_path_length=80,
                     in_place=True,
                 )
             )

@@ -28,7 +28,7 @@ python -m unittest discover -s tests -v
 ## 打包 exe
 
 ```powershell
-.\build.ps1
+powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
 產出檔會在 `dist\NameCutter.exe`。
@@ -40,4 +40,3 @@ python -m unittest discover -s tests -v
 - 若路徑長度超限，只從檔名尾端開始截短，優先保留前綴
 - 若截短後重名，會自動加入 `_1`、`_2`
 - 若即使縮到極短仍無法符合限制，該檔案會被跳過並在結果內標示
-
