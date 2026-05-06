@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 ## 自動發版
 
-專案內建 GitHub Actions 發版流程。當你 push 一個像 `v0.1.2` 這樣的 tag 時，GitHub Actions 會自動：
+專案內建 GitHub Actions 發版流程。當你 push 一個像 `v0.2.0` 這樣的 tag 時，GitHub Actions 會自動：
 
 - 在 Windows runner 上跑測試
 - 執行 `build.ps1` 產出 `NameCutter.exe`
@@ -46,13 +46,13 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 手動觸發範例：
 
 ```powershell
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 也可以在 GitHub 的 `Actions -> Release -> Run workflow` 手動觸發，直接輸入版本號：
 
-- 可輸入 `0.1.2` 或 `v0.1.2`
+- 可輸入 `0.2.0` 或 `v0.2.0`
 - workflow 會先檢查輸入值是否和 `pyproject.toml` 內的版本一致
 - 檢查通過後，workflow 會自動建立對應 tag、打包、產生 checksum、建立 Release
 
