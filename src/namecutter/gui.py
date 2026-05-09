@@ -20,6 +20,7 @@ MODE_TO_LABEL: dict[LimitMode, str] = {
     "filename": "File Name Length",
 }
 LABEL_TO_MODE = {label: mode for mode, label in MODE_TO_LABEL.items()}
+PreviewSignature = tuple[str, str, LimitMode, int, bool]
 
 
 class NameCutterApp:
@@ -40,10 +41,12 @@ class NameCutterApp:
         self.preview_items: list[PreviewItem] = []
         self.preview_is_partial = False
         self.preview_limit_mode: LimitMode = "path"
-        self.preview_signature: tuple[str, str, str, int, int, bool] | None = None
+        self.preview_signature: PreviewSignature | None = None
         self.preview_total_scanned = 0
         self.preview_ready_count = 0
         self.preview_skipped_count = 0
+        self.sort_column: str | None = None
+        self.sort_descending = False
 
         self.worker_queue: queue.Queue[tuple[str, object]] | None = None
         self.worker_thread: threading.Thread | None = None
@@ -127,8 +130,8 @@ class NameCutterApp:
         table_frame.rowconfigure(0, weight=1)
 
         columns = ("source", "target", "original_length", "action", "status", "reason")
-        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
-        headings = {
+        self.tree_columns = columns
+        self.tree_base_headings = {
             "source": "Source Path",
             "target": "Target Path",
             "original_length": "Original Path Length",
@@ -144,9 +147,11 @@ class NameCutterApp:
             "status": 90,
             "reason": 260,
         }
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
         for column in columns:
-            self.tree.heading(column, text=headings[column])
+            self.tree.heading(column, command=lambda selected=column: self._sort_tree_by(selected))
             self.tree.column(column, width=widths[column], anchor="w")
+        self._refresh_tree_headings()
 
         vertical_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         horizontal_scroll = ttk.Scrollbar(
@@ -207,6 +212,10 @@ class NameCutterApp:
             return
         if self.in_place_var.get() and self.output_var.get() != self.source_var.get():
             self.output_var.set(self.source_var.get())
+        if self.preview_signature is None:
+            return
+        if self._signature_from_state() == self.preview_signature:
+            return
         self._invalidate_preview("Options changed. Scan Preview to refresh.")
 
     def _scan_preview(self) -> None:
@@ -334,16 +343,60 @@ class NameCutterApp:
     def _selected_limit_mode(self) -> LimitMode:
         return LABEL_TO_MODE[self.limit_mode_var.get()]
 
-    def _signature_for_options(self, options: ScanOptions) -> tuple[str, str, str, int, int, bool]:
+    def _signature_for_options(self, options: ScanOptions) -> PreviewSignature:
         source_dir = str(options.source_dir.expanduser().resolve(strict=False))
         output_dir = str(options.output_dir.expanduser().resolve(strict=False))
+        active_limit = (
+            options.max_path_length
+            if options.limit_mode == "path"
+            else options.max_filename_length
+        )
         return (
             source_dir,
             output_dir,
             options.limit_mode,
-            options.max_path_length,
-            options.max_filename_length,
+            active_limit,
             options.in_place,
+        )
+
+    def _signature_from_state(self) -> PreviewSignature | None:
+        source_text = self.source_var.get().strip()
+        output_text = self.output_var.get().strip()
+        if not source_text:
+            return None
+
+        if self.in_place_var.get():
+            output_text = source_text
+        elif not output_text:
+            return None
+
+        limit_mode = self._selected_limit_mode()
+        try:
+            path_limit = self._read_limit_value(
+                self.path_limit_var.get(),
+                "Max path length",
+                required=limit_mode == "path",
+                fallback=66,
+            )
+            filename_limit = self._read_limit_value(
+                self.filename_limit_var.get(),
+                "Max file name length",
+                required=limit_mode == "filename",
+                fallback=66,
+            )
+        except ValueError:
+            return None
+
+        source_dir = Path(source_text).expanduser().resolve(strict=False)
+        output_dir = Path(output_text).expanduser().resolve(strict=False)
+        active_limit = path_limit if limit_mode == "path" else filename_limit
+        in_place = self.in_place_var.get() or source_dir == output_dir
+        return (
+            str(source_dir),
+            str(output_dir),
+            limit_mode,
+            active_limit,
+            in_place,
         )
 
     def _start_worker(
@@ -487,6 +540,8 @@ class NameCutterApp:
 
         if partial_switched:
             self._refresh_tree()
+        elif self.sort_column is not None and rows_to_append:
+            self._refresh_tree()
         elif rows_to_append:
             self._append_tree_rows(rows_to_append)
 
@@ -607,7 +662,8 @@ class NameCutterApp:
         return summary
 
     def _refresh_tree(self) -> None:
-        self._set_length_column(self.preview_limit_mode)
+        self._apply_sort()
+        self._refresh_tree_headings()
         for item_id in self.tree.get_children():
             self.tree.delete(item_id)
 
@@ -633,6 +689,60 @@ class NameCutterApp:
             item.reason,
         )
 
-    def _set_length_column(self, limit_mode: LimitMode) -> None:
-        heading = "Original Path Length" if limit_mode == "path" else "Original Name Length"
-        self.tree.heading("original_length", text=heading)
+    def _refresh_tree_headings(self) -> None:
+        for column in self.tree_columns:
+            heading = self._heading_text(column)
+            self.tree.heading(
+                column,
+                text=heading,
+                command=lambda selected=column: self._sort_tree_by(selected),
+            )
+
+    def _heading_text(self, column: str) -> str:
+        if column == "original_length":
+            base_heading = (
+                "Original Path Length"
+                if self.preview_limit_mode == "path"
+                else "Original Name Length"
+            )
+        else:
+            base_heading = self.tree_base_headings[column]
+
+        if self.sort_column != column:
+            return base_heading
+
+        direction = "DESC" if self.sort_descending else "ASC"
+        return f"{base_heading} ({direction})"
+
+    def _sort_tree_by(self, column: str) -> None:
+        if self.sort_column == column:
+            self.sort_descending = not self.sort_descending
+        else:
+            self.sort_column = column
+            self.sort_descending = False
+        self._refresh_tree()
+
+    def _apply_sort(self) -> None:
+        if self.sort_column is None or len(self.preview_items) < 2:
+            return
+        self.preview_items.sort(
+            key=lambda item: self._sort_value(item, self.sort_column),
+            reverse=self.sort_descending,
+        )
+
+    def _sort_value(self, item: PreviewItem, column: str) -> str | int:
+        if column == "source":
+            return str(item.source_path).casefold()
+        if column == "target":
+            return str(item.target_path).casefold()
+        if column == "original_length":
+            return (
+                item.original_path_length
+                if self.preview_limit_mode == "path"
+                else item.original_name_length
+            )
+        if column == "action":
+            return item.action.casefold()
+        if column == "status":
+            return item.status.casefold()
+        return item.reason.casefold()

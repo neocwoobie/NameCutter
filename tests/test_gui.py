@@ -152,6 +152,92 @@ class NameCutterGuiTests(unittest.TestCase):
         finally:
             app.root.destroy()
 
+    def test_clicking_column_heading_toggles_sort_direction(self) -> None:
+        app = NameCutterApp()
+        try:
+            app.preview_limit_mode = "path"
+            app.preview_items = [
+                _preview_item("beta.txt", original_path_length=90),
+                _preview_item("alpha.txt", original_path_length=80),
+            ]
+
+            app._sort_tree_by("source")
+
+            sorted_sources = [
+                app.tree.item(item_id, "values")[0]
+                for item_id in app.tree.get_children()
+            ]
+            self.assertEqual(
+                [r"C:\input\alpha.txt", r"C:\input\beta.txt"],
+                sorted_sources,
+            )
+            self.assertEqual("Source Path (ASC)", app.tree.heading("source")["text"])
+
+            app._sort_tree_by("source")
+
+            reverse_sorted_sources = [
+                app.tree.item(item_id, "values")[0]
+                for item_id in app.tree.get_children()
+            ]
+            self.assertEqual(
+                [r"C:\input\beta.txt", r"C:\input\alpha.txt"],
+                reverse_sorted_sources,
+            )
+            self.assertEqual("Source Path (DESC)", app.tree.heading("source")["text"])
+        finally:
+            app.root.destroy()
+
+    def test_sorting_original_length_uses_name_length_in_filename_mode(self) -> None:
+        app = NameCutterApp()
+        try:
+            app.preview_limit_mode = "filename"
+            app.preview_items = [
+                _preview_item("beta.txt", original_name_length=9),
+                _preview_item("alpha.txt", original_name_length=4),
+            ]
+
+            app._sort_tree_by("original_length")
+
+            sorted_lengths = [
+                app.tree.item(item_id, "values")[2]
+                for item_id in app.tree.get_children()
+            ]
+            self.assertEqual(["4", "9"], sorted_lengths)
+            self.assertEqual(
+                "Original Name Length (ASC)",
+                app.tree.heading("original_length")["text"],
+            )
+        finally:
+            app.root.destroy()
+
+    def test_inactive_limit_change_keeps_preview_valid(self) -> None:
+        app = NameCutterApp()
+        try:
+            with tempfile.TemporaryDirectory() as root_dir:
+                root = Path(root_dir)
+                source_dir = root / "src"
+                output_dir = root / "out"
+                source_dir.mkdir()
+                output_dir.mkdir()
+
+                app.source_var.set(str(source_dir))
+                app.output_var.set(str(output_dir))
+                app.path_limit_var.set("88")
+                app.filename_limit_var.set("10")
+                app.limit_mode_var.set(MODE_TO_LABEL["path"])
+
+                app.preview_signature = app._signature_for_options(app._read_options())
+
+                app.filename_limit_var.set("12")
+
+                self.assertIsNotNone(app.preview_signature)
+                self.assertEqual(
+                    app._signature_for_options(app._read_options()),
+                    app.preview_signature,
+                )
+        finally:
+            app.root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()
