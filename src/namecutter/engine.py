@@ -12,7 +12,7 @@ import uuid
 from .models import ExecutionSummary, LimitMode, PreviewItem, ScanOptions
 
 _PROGRESS_BATCH_SIZE = 250
-ProgressCallback = Callable[[str, int, int, int], None]
+ProgressCallback = Callable[[str, int, int, int, int], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,11 @@ class _CandidatePlan:
 
 def build_preview(options: ScanOptions) -> list[PreviewItem]:
     return list(iter_preview(options))
+
+
+def count_source_files(options: ScanOptions) -> int:
+    source_dir, _ = _resolve_scan_roots(options)
+    return sum(1 for _ in _iter_source_files(source_dir))
 
 
 def iter_preview(options: ScanOptions) -> Iterator[PreviewItem]:
@@ -82,13 +87,17 @@ def iter_preview(options: ScanOptions) -> Iterator[PreviewItem]:
         )
 
 
-def apply_preview(preview: list[PreviewItem]) -> ExecutionSummary:
+def apply_preview(
+    preview: list[PreviewItem],
+    progress_callback: ProgressCallback | None = None,
+) -> ExecutionSummary:
     processed = len(preview)
     skipped = sum(1 for item in preview if item.status == "skip")
     changed = 0
 
     rename_items = [item for item in preview if item.action == "rename"]
     copy_items = [item for item in preview if item.action == "copy"]
+    total_changes = len(rename_items) + len(copy_items)
 
     staged_renames: list[tuple[Path, Path]] = []
 
@@ -101,11 +110,39 @@ def apply_preview(preview: list[PreviewItem]) -> ExecutionSummary:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path.rename(target_path)
         changed += 1
+        _report_progress(
+            progress_callback,
+            "apply",
+            processed,
+            changed,
+            skipped,
+            total_changes,
+            progress_counter=changed,
+        )
 
     for item in copy_items:
         item.target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(item.source_path, item.target_path)
         changed += 1
+        _report_progress(
+            progress_callback,
+            "apply",
+            processed,
+            changed,
+            skipped,
+            total_changes,
+            progress_counter=changed,
+        )
+
+    _report_progress(
+        progress_callback,
+        "apply",
+        processed,
+        changed,
+        skipped,
+        total_changes,
+        force=True,
+    )
 
     return ExecutionSummary(
         processed=processed,
@@ -128,6 +165,7 @@ def _apply_copy_options(
     options: ScanOptions,
     progress_callback: ProgressCallback | None,
 ) -> ExecutionSummary:
+    total_files = count_source_files(options)
     processed = 0
     changed = 0
     skipped = 0
@@ -142,6 +180,7 @@ def _apply_copy_options(
                 processed,
                 changed,
                 skipped,
+                total_files,
                 progress_counter=processed,
             )
             continue
@@ -155,10 +194,19 @@ def _apply_copy_options(
             processed,
             changed,
             skipped,
+            total_files,
             progress_counter=processed,
         )
 
-    _report_progress(progress_callback, "apply", processed, changed, skipped, force=True)
+    _report_progress(
+        progress_callback,
+        "apply",
+        processed,
+        changed,
+        skipped,
+        total_files,
+        force=True,
+    )
     return ExecutionSummary(
         processed=processed,
         changed=changed,
@@ -171,6 +219,7 @@ def _apply_in_place_options(
     options: ScanOptions,
     progress_callback: ProgressCallback | None,
 ) -> ExecutionSummary:
+    total_files = count_source_files(options)
     processed = 0
     skipped = 0
     changed = 0
@@ -189,8 +238,12 @@ def _apply_in_place_options(
             processed,
             changed,
             skipped,
+            total_files,
             progress_counter=processed,
         )
+
+    if progress_callback is not None:
+        progress_callback("apply_setup", processed, changed, skipped, len(rename_items))
 
     staged_renames: list[tuple[Path, Path]] = []
 
@@ -209,10 +262,19 @@ def _apply_in_place_options(
             processed,
             changed,
             skipped,
+            len(rename_items),
             progress_counter=changed,
         )
 
-    _report_progress(progress_callback, "apply", processed, changed, skipped, force=True)
+    _report_progress(
+        progress_callback,
+        "apply",
+        processed,
+        changed,
+        skipped,
+        len(rename_items),
+        force=True,
+    )
     return ExecutionSummary(
         processed=processed,
         changed=changed,
@@ -390,6 +452,7 @@ def _report_progress(
     processed: int,
     changed: int,
     skipped: int,
+    total: int,
     *,
     progress_counter: int | None = None,
     force: bool = False,
@@ -399,7 +462,7 @@ def _report_progress(
     counter = processed if progress_counter is None else progress_counter
     if not force and counter % _PROGRESS_BATCH_SIZE != 0:
         return
-    progress_callback(phase, processed, changed, skipped)
+    progress_callback(phase, processed, changed, skipped, total)
 
 
 def _make_temp_path(source_path: Path) -> Path:

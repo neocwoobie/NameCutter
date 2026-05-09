@@ -7,7 +7,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from .engine import apply_options, apply_preview, iter_preview
+from .engine import apply_options, apply_preview, count_source_files, iter_preview
 from .models import LimitMode, PreviewItem, ScanOptions
 
 FULL_PREVIEW_LIMIT = 10_000
@@ -47,6 +47,9 @@ class NameCutterApp:
         self.preview_skipped_count = 0
         self.sort_column: str | None = None
         self.sort_descending = False
+        self.progress_scan_total = 0
+        self.progress_apply_total = 0
+        self.progress_skipped_offset = 0
 
         self.worker_queue: queue.Queue[tuple[str, object]] | None = None
         self.worker_thread: threading.Thread | None = None
@@ -168,7 +171,7 @@ class NameCutterApp:
         vertical_scroll.grid(row=0, column=1, sticky="ns")
         horizontal_scroll.grid(row=1, column=0, sticky="ew")
 
-        self.progress = ttk.Progressbar(root, mode="indeterminate")
+        self.progress = ttk.Progressbar(root, mode="determinate", maximum=100, value=0)
         self.progress.grid(row=2, column=0, sticky="ew", padx=16)
 
         status_bar = ttk.Label(root, textvariable=self.summary_var, padding=(16, 8))
@@ -412,8 +415,8 @@ class NameCutterApp:
             args=(payload, self.worker_queue),
             daemon=True,
         )
+        self._prepare_progress(worker_kind, payload)
         self._sync_control_states()
-        self.progress.start(10)
         self.worker_thread.start()
         self.root.after(WORKER_POLL_MS, self._poll_worker_queue)
 
@@ -423,6 +426,8 @@ class NameCutterApp:
         message_queue: queue.Queue[tuple[str, object]],
     ) -> None:
         try:
+            total_files = count_source_files(options)
+            message_queue.put(("preview_total", total_files))
             batch: list[PreviewItem] = []
             for item in iter_preview(options):
                 batch.append(item)
@@ -441,8 +446,17 @@ class NameCutterApp:
         preview_items: list[PreviewItem],
         message_queue: queue.Queue[tuple[str, object]],
     ) -> None:
+        def report_progress(
+            _phase: str,
+            _processed: int,
+            changed: int,
+            _skipped: int,
+            _total: int,
+        ) -> None:
+            message_queue.put(("preview_apply_progress", {"changed": changed}))
+
         try:
-            summary = apply_preview(preview_items)
+            summary = apply_preview(preview_items, progress_callback=report_progress)
             message_queue.put(("apply_done", summary))
         except OSError as error:
             message_queue.put(("worker_error", ("Execution failed", str(error))))
@@ -452,7 +466,13 @@ class NameCutterApp:
         options: ScanOptions,
         message_queue: queue.Queue[tuple[str, object]],
     ) -> None:
-        def report_progress(phase: str, processed: int, changed: int, skipped: int) -> None:
+        def report_progress(
+            phase: str,
+            processed: int,
+            changed: int,
+            skipped: int,
+            total: int,
+        ) -> None:
             message_queue.put(
                 (
                     "apply_progress",
@@ -461,6 +481,7 @@ class NameCutterApp:
                         "processed": processed,
                         "changed": changed,
                         "skipped": skipped,
+                        "total": total,
                     },
                 )
             )
@@ -492,21 +513,30 @@ class NameCutterApp:
         self._finish_worker()
 
     def _handle_worker_message(self, message_type: str, payload: object) -> None:
+        if message_type == "preview_total":
+            self._set_preview_progress_total(payload)
+            return
         if message_type == "preview_batch":
             self._consume_preview_batch(payload)
             return
         if message_type == "preview_done":
+            self._set_progress_percent(100)
             self.summary_var.set(self._preview_summary_text(scanning=False))
+            return
+        if message_type == "preview_apply_progress":
+            self._update_preview_apply_progress(payload)
             return
         if message_type == "apply_progress":
             self._update_apply_progress(payload)
             return
         if message_type == "apply_done":
+            self._set_progress_percent(100)
             self._finish_worker()
             self._show_execution_summary(payload)
             return
         if message_type == "worker_error":
             failed_kind = self.worker_kind
+            self._set_progress_percent(0)
             self._finish_worker()
             if failed_kind == "scan":
                 self.preview_signature = None
@@ -545,7 +575,35 @@ class NameCutterApp:
         elif rows_to_append:
             self._append_tree_rows(rows_to_append)
 
+        self._update_preview_progress()
         self.summary_var.set(self._preview_summary_text(scanning=True))
+
+    def _set_preview_progress_total(self, payload: object) -> None:
+        if not isinstance(payload, int):
+            return
+        self.progress_scan_total = max(payload, 0)
+        if self.progress_scan_total == 0:
+            self._set_progress_percent(100)
+
+    def _update_preview_progress(self) -> None:
+        if self.progress_scan_total <= 0:
+            return
+        self._set_progress_fraction(self.preview_total_scanned, self.progress_scan_total)
+
+    def _update_preview_apply_progress(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+
+        changed = payload.get("changed")
+        if not isinstance(changed, int):
+            return
+
+        total = self.progress_apply_total
+        if total <= 0:
+            self._set_progress_percent(100)
+            return
+
+        self._set_progress_fraction(self.progress_skipped_offset + changed, total)
 
     def _update_apply_progress(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -555,13 +613,37 @@ class NameCutterApp:
         processed = payload["processed"]
         changed = payload["changed"]
         skipped = payload["skipped"]
+        total = payload["total"]
 
         if phase == "scan":
+            self.progress_scan_total = max(total, 0)
+            if self.progress_scan_total <= 0:
+                self._set_progress_percent(50)
+            else:
+                self._set_progress_percent((processed / self.progress_scan_total) * 50)
             self.summary_var.set(
                 "Scanning all files before execution... "
                 f"Processed {processed}, ready {processed - skipped}, skipped {skipped}."
             )
             return
+
+        if phase == "apply_setup":
+            self.progress_apply_total = max(total, 0)
+            if self.progress_apply_total <= 0:
+                self._set_progress_percent(100)
+            else:
+                self._set_progress_percent(50)
+            return
+
+        if self.progress_scan_total > 0:
+            if self.progress_apply_total <= 0:
+                self._set_progress_percent(100)
+            else:
+                self._set_progress_percent(50 + ((changed / self.progress_apply_total) * 50))
+        elif total <= 0:
+            self._set_progress_percent(100)
+        else:
+            self._set_progress_fraction(processed, total)
 
         self.summary_var.set(
             "Applying changes... "
@@ -589,7 +671,9 @@ class NameCutterApp:
         )
 
     def _finish_worker(self) -> None:
-        self.progress.stop()
+        self.progress_scan_total = 0
+        self.progress_apply_total = 0
+        self.progress_skipped_offset = 0
         self.worker_kind = None
         self.worker_thread = None
         self.worker_queue = None
@@ -647,8 +731,34 @@ class NameCutterApp:
         self.preview_total_scanned = 0
         self.preview_ready_count = 0
         self.preview_skipped_count = 0
+        self._set_progress_percent(0)
         self._refresh_tree()
         self.summary_var.set(message)
+
+    def _prepare_progress(self, worker_kind: str, payload: object) -> None:
+        self.progress_scan_total = 0
+        self.progress_apply_total = 0
+        self.progress_skipped_offset = 0
+        self._set_progress_percent(0)
+
+        if worker_kind != "apply" or not isinstance(payload, list):
+            return
+
+        self.progress_apply_total = len(payload)
+        self.progress_skipped_offset = sum(1 for item in payload if item.status == "skip")
+        if self.progress_apply_total > 0:
+            self._set_progress_fraction(self.progress_skipped_offset, self.progress_apply_total)
+
+    def _set_progress_fraction(self, current: int, total: int) -> None:
+        if total <= 0:
+            self._set_progress_percent(100)
+            return
+        percent = (max(0, current) / total) * 100
+        self._set_progress_percent(percent)
+
+    def _set_progress_percent(self, percent: float) -> None:
+        bounded = max(0.0, min(100.0, percent))
+        self.progress.configure(value=bounded)
 
     def _preview_summary_text(self, *, scanning: bool) -> str:
         action = "Scanning preview..." if scanning else "Preview ready."

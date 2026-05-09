@@ -238,6 +238,101 @@ class NameCutterGuiTests(unittest.TestCase):
         finally:
             app.root.destroy()
 
+    def test_preview_progress_accumulates_with_known_total(self) -> None:
+        app = NameCutterApp()
+        try:
+            app._set_preview_progress_total(4)
+            app._consume_preview_batch([
+                _preview_item("alpha.txt"),
+                _preview_item("beta.txt"),
+            ])
+
+            self.assertEqual(50.0, float(app.progress["value"]))
+        finally:
+            app.root.destroy()
+
+    def test_apply_progress_uses_processed_fraction_in_copy_mode(self) -> None:
+        app = NameCutterApp()
+        try:
+            app._update_apply_progress(
+                {
+                    "phase": "apply",
+                    "processed": 2,
+                    "changed": 1,
+                    "skipped": 1,
+                    "total": 4,
+                }
+            )
+
+            self.assertEqual(50.0, float(app.progress["value"]))
+        finally:
+            app.root.destroy()
+
+    def test_apply_progress_uses_two_phases_for_in_place_mode(self) -> None:
+        app = NameCutterApp()
+        try:
+            app._update_apply_progress(
+                {
+                    "phase": "scan",
+                    "processed": 2,
+                    "changed": 0,
+                    "skipped": 1,
+                    "total": 4,
+                }
+            )
+            self.assertEqual(25.0, float(app.progress["value"]))
+
+            app._update_apply_progress(
+                {
+                    "phase": "apply_setup",
+                    "processed": 4,
+                    "changed": 0,
+                    "skipped": 1,
+                    "total": 2,
+                }
+            )
+            self.assertEqual(50.0, float(app.progress["value"]))
+
+            app._update_apply_progress(
+                {
+                    "phase": "apply",
+                    "processed": 4,
+                    "changed": 1,
+                    "skipped": 1,
+                    "total": 2,
+                }
+            )
+            self.assertEqual(75.0, float(app.progress["value"]))
+        finally:
+            app.root.destroy()
+
+    def test_preview_apply_progress_counts_skipped_rows_as_complete(self) -> None:
+        app = NameCutterApp()
+        try:
+            app._prepare_progress(
+                "apply",
+                [
+                    _preview_item("alpha.txt"),
+                    PreviewItem(
+                        source_path=Path(r"C:\input\beta.txt"),
+                        target_path=Path(r"C:\output\beta.txt"),
+                        action="skip",
+                        status="skip",
+                        reason="Skip.",
+                        original_path_length=81,
+                        original_name_length=4,
+                    ),
+                    _preview_item("gamma.txt"),
+                    _preview_item("delta.txt"),
+                ],
+            )
+
+            app._update_preview_apply_progress({"changed": 2})
+
+            self.assertEqual(75.0, float(app.progress["value"]))
+        finally:
+            app.root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()
